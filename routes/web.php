@@ -24,3 +24,8 @@ Route::prefix('telegram')
         Route::get('webhook', [WebhookController::class, 'set'])->name('webhook-set');
         Route::post('webhook', [WebhookController::class, 'handle'])->name('webhook-handle');
     });
+
+
+Route::group(['prefix' => 'admin'], function () {
+    Voyager::routes();
+});
