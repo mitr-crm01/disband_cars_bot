@@ -123,7 +123,7 @@ class WebhookController extends Controller
 
 
     /**
-     * @throws JsonException
+     * @throws \JsonException
      */
     private function buildKeyboard(): false|string
     {
@@ -140,7 +140,7 @@ class WebhookController extends Controller
     }
 
     /**
-     * @throws JsonException
+     * @throws \JsonException
      */
     private function buildNumberKeyboard(): false|string
     {
