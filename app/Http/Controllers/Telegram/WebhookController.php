@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Telegram;
 
 use App\Http\Controllers\Controller;
+use App\Models\TelegramUser;
 use App\Telegram\Queries\AbstractQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Telegram\Bot\Events\UpdateEvent;
 use Telegram\Bot\Laravel\Facades\Telegram;
 
@@ -31,21 +33,76 @@ class WebhookController extends Controller
     public function handle(Request $request): JsonResponse
     {
         try {
-            // Processing buttons
-            Telegram::on('callback_query.text', function (UpdateEvent $event) {
-                $action = AbstractQuery::match($event->update->callbackQuery->data);
+            Telegram::on('message.contact', function (UpdateEvent $event) {
+                $message = $event->update->message;
+                $chat_id = $message->from->id;
+                $phone_number = $message->contact->phone_number;
+                $user_id = $message->contact->user_id;
 
-                if ($action) {
-                    $action = new $action();
-                    $action->handle($event);
+                if ($user_id === $chat_id) {
 
-                    return null;
+                    $telegramUser = TelegramUser::where('telegram_id', $chat_id)->first();
+
+                    if (!str_starts_with($phone_number, '+')) {
+                        $phone_number = '+' . $phone_number;
+                    }
+
+                    $telegramUser->phone_number = $phone_number;
+                    $telegramUser->save();
+
+                    $event->telegram->sendMessage([
+                        'chat_id' => $chat_id,
+                        'text' => "✅ Ваш номер телефона подтверждён\nСкоро вам предоставят доступ до функций бота",
+                        'reply_markup' => $this->buildKeyboard(),
+                    ]);
+
+                } else {
+
+                    $event->telegram->sendMessage([
+                        'chat_id' => $chat_id,
+                        'text' => "⚠️ Это не ваш номер телефона!\nНажмите на кнопку ниже чтобы поделиться своим номером телефона",
+                        'reply_markup' => $this->buildNumberKeyboard(),
+                    ]);
+
+                }
+            });
+
+            Telegram::on('message.text', function (UpdateEvent $event) {
+                $message = $event->update->message;
+                $from = $message->from;
+                $text = $message->text;
+                $chat_id = $from->id;
+
+                $telegramUser = TelegramUser::where('telegram_id', $chat_id)->first();
+
+                $is_allowed = $telegramUser->state->is_allowed;
+                $state = $telegramUser->state->state;
+
+                if (!str_starts_with($text, '/')) {
+
+                    if ($is_allowed && !empty($telegramUser->phone_number)) {
+
+                        switch ($state) {
+                            case 'initial':
+
+                                $event->telegram->sendMessage([
+                                    'chat_id' => $chat_id,
+                                    'text' => "initial text",
+                                ]);
+                                break;
+                        }
+
+                    } else {
+
+                        $event->telegram->sendMessage([
+                            'chat_id' => $chat_id,
+                            'text' => "Вам не предоставили доступ для использования бота(",
+                        ]);
+
+                    }
+
                 }
 
-                return $event->telegram->answerCallbackQuery([
-                    'callback_query_id' => $event->update->callbackQuery->id,
-                    'text' => 'Unfortunately, there is no matched action to respond to this callback',
-                ]);
             });
 
             Telegram::commandsHandler(true);
@@ -62,5 +119,37 @@ class WebhookController extends Controller
                     'error' => $exception->getMessage()
                 ]);
         }
+    }
+
+
+    /**
+     * @throws JsonException
+     */
+    private function buildKeyboard(): false|string
+    {
+        return json_encode([
+            'keyboard' => [
+                [
+                    ['text' => '📋 Доступные автовозы']
+                ],
+                [
+                    ['text' => '🗄 Архив расформирований']
+                ]
+            ]
+        ], JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * @throws JsonException
+     */
+    private function buildNumberKeyboard(): false|string
+    {
+        return json_encode([
+            'keyboard' => [
+                [
+                    ['text' => '🤙 Поделиться номером телефона', 'request_contact' => true],
+                ],
+            ]
+        ], JSON_THROW_ON_ERROR);
     }
 }

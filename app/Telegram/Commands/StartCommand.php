@@ -28,10 +28,26 @@ class StartCommand extends Command
             ]
         );
 
-        $this->replyWithMessage([
-            'text' => 'Press on a button',
-            'reply_markup' => $this->buildKeyboard(),
-        ]);
+        if ($telegramUser) {
+
+            if (empty($telegramUser->phone_number)) {
+
+                $this->replyWithMessage([
+                    'text' => $telegramUser->first_name . ', поделитесь номером телефона:',
+                    'reply_markup' => $this->buildNumberKeyboard(),
+                ]);
+
+            } else {
+
+                $this->replyWithMessage([
+                    'text' => $telegramUser->first_name . ', выберите опцию:',
+                    'reply_markup' => $this->buildKeyboard(),
+                ]);
+
+            }
+        }
+
+
     }
 
     /**
@@ -42,13 +58,24 @@ class StartCommand extends Command
         return json_encode([
             'keyboard' => [
                 [
-                    ['text' => '🎲 Random Number']
+                    ['text' => '📋 Доступные автовозы']
                 ],
                 [
-                    ['text' => '🎲 Inline Keyboard']
-                ],
+                    ['text' => '🗄 Архив расформирований']
+                ]
+            ]
+        ], JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * @throws JsonException
+     */
+    private function buildNumberKeyboard(): false|string
+    {
+        return json_encode([
+            'keyboard' => [
                 [
-                    ['text' => 'Void']
+                    ['text' => '🤙 Поделиться номером телефона', 'request_contact' => true],
                 ],
             ]
         ], JSON_THROW_ON_ERROR);
