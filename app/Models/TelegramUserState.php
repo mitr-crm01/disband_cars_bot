@@ -43,4 +43,35 @@ class TelegramUserState extends Model
     {
         return $this->belongsTo(TelegramUser::class);
     }
+
+    public function getCurrentState()
+    {
+        if ($this->state) {
+            $states = explode(':', $this->state);
+            return end($states);
+        }
+
+        return 'start';
+    }
+
+    public function addState($newState)
+    {
+        if ($this->state) {
+            $this->state .= ":$newState";
+        } else {
+            $this->state = $newState;
+        }
+
+        $this->save();
+    }
+
+    public function removeLastState()
+    {
+        if ($this->state) {
+            $states = explode(':', $this->state);
+            array_pop($states);
+            $this->state = implode(':', $states);
+            $this->save();
+        }
+    }
 }

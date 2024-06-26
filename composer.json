@@ -12,7 +12,8 @@
         "laravel/framework": "^10.10",
         "laravel/horizon": "^5.18",
         "laravel/sanctum": "^3.2",
-        "laravel/tinker": "^2.8"
+        "laravel/tinker": "^2.8",
+        "ext-calendar": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.9.1",
