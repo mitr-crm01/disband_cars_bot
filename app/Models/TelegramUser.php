@@ -39,4 +39,27 @@ class TelegramUser extends Model
     protected $casts = [
         'is_premium' => 'boolean',
     ];
+
+    /**
+     * Get the state record associated with the user.
+     */
+    public function state()
+    {
+        return $this->hasOne(TelegramUserState::class);
+    }
+
+    /**
+     * Boot method for the model.
+     */
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::created(function ($user) {
+            $user->state()->create([
+                'is_allowed' => false,
+                'state' => 'initial',
+            ]);
+        });
+    }
 }
