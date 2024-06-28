@@ -113,6 +113,10 @@ class WebhookController extends Controller
                                 $this->handleSelectedCarState($event, $telegramUser, $text);
                                 break;
 
+                            case 'accept_disband_car':
+                                $this->handleAcceptDisbandCarState($event, $telegramUser, $text);
+                                break;
+
                             case 'available_month':
                                 $this->handleAvailableMonthState($event, $telegramUser, $text);
                                 break;
@@ -131,7 +135,7 @@ class WebhookController extends Controller
 
                         $event->telegram->sendMessage([
                             'chat_id' => $chat_id,
-                            'text' => "Вам не предоставили доступ для использования бота(",
+                            'text' => "Скоро предоставят доступ",
                         ]);
 
                     }
@@ -322,7 +326,12 @@ class WebhookController extends Controller
 
         } else {
 
-            $telegramUser->state->addState("selected_car");
+            $CarId = DB::connection('mysql_dbmihold')
+                ->table('b_crm_deal')
+                ->where('TITLE', $text)
+                ->value('ID');
+
+            $telegramUser->state->addState("selected_car-$CarId");
 
             return $event->telegram->sendMessage([
                 'chat_id' => $telegramUser->telegram_id,
@@ -382,13 +391,24 @@ class WebhookController extends Controller
                 'reply_markup' => $this->buildKeyboard($cars)
             ]);
 
-        } else if ($text == 'Расформировать') {
+        } else if ($text == 'Расформировать на ЧЛС') {
+
+            $state = $telegramUser->state->getCurrentState();
+
+            $baseState = explode('-', $state)[1];
+
+            $CarTitle = DB::connection('mysql_dbmihold')
+                ->table('b_crm_deal')
+                ->where('ID', $baseState)
+                ->value('TITLE');
+
+            $telegramUser->state->addState("accept_disband_car");
 
             return $event->telegram->sendMessage([
                 'chat_id' => $telegramUser->telegram_id,
-                'text' => "Введите дату расформирования в формате: день.месяц.год (20.06.2024)\nИли нажмите кнопку 'Указать сегодняшнюю дату'",
+                'text' => "Проверка вводных данных:\nВыбран $CarTitle\nРасформировать на ЧЛС?",
                 'reply_markup' => $this->buildKeyboard([
-                    'Указать сегодняшнюю дату', 'Назад'
+                    'Подтвердить', 'Назад'
                 ])
             ]);
 
@@ -490,8 +510,6 @@ class WebhookController extends Controller
 
             $fullState = $telegramUser->state->state;
 
-            Log::info($fullState);
-
             preg_match('/selected_carriers-(\d+):available_month:selected_month-(\d+):selected_number-(\d+)/', $fullState, $matches);
 
             if ($matches) {
@@ -509,13 +527,13 @@ class WebhookController extends Controller
             // Формируем строку даты
             $dateString = "$day.$month.$currentYear";
 
-            Log::info($selectedCarriers);
-            Log::info($selectedMonth);
-            Log::info($selectedNumber);
+//            Log::info($selectedCarriers);
+//            Log::info($selectedMonth);
+//            Log::info($selectedNumber);
 
             $carrier = Carrier::where('b_id', $selectedCarriers)->first();
 
-            Log::info($carrier->b_title);
+//            Log::info($carrier->b_title);
 
             return $event->telegram->sendMessage([
                 'chat_id' => $telegramUser->telegram_id,
@@ -561,22 +579,227 @@ class WebhookController extends Controller
 
 //            $telegramUser->state->addState("confirm");
 
-            TelegramUserState::updateOrCreate(
-                ['telegram_user_id' => $telegramUser->id],
-                ['state' => 'initial']
-            );
+            $fullState = $telegramUser->state->state;
 
-            return $event->telegram->sendMessage([
-                'chat_id' => $telegramUser->telegram_id,
-                'text' => "Автовоз успешно расформирован!",
-                'reply_markup' => $this->buildKeyboard([
-                    '📋 Доступные автовозы',
-                    '🗄 Архив расформирований'
-                ])
-            ]);
+            preg_match('/selected_carriers-(\d+):available_month:selected_month-(\d+):selected_number-(\d+)/', $fullState, $matches);
+
+            if ($matches) {
+                $selectedCarriers = $matches[1];
+                $selectedMonth = $matches[2];
+                $selectedNumber = $matches[3];
+            }
+
+            $currentYear = date('Y');
+
+            $month = str_pad($selectedMonth, 2, '0', STR_PAD_LEFT);
+            $day = str_pad($selectedNumber, 2, '0', STR_PAD_LEFT);
+
+            $dateString = "$day.$month.$currentYear";
+
+            $user = $this->getBitrixUserId($telegramUser);
+
+            if ($user) {
+                Log::info('start webhook');
+                $this->StartBP($selectedCarriers, $user, $dateString, '');
+                Log::info('end webhook');
+
+//                Carrier::updateOrCreate(['b_id' => $selectedCarriers],['is_disabled' => true]);
+
+                TelegramUserState::updateOrCreate(
+                    ['telegram_user_id' => $telegramUser->id],
+                    ['state' => 'initial']
+                );
+
+                return $event->telegram->sendMessage([
+                    'chat_id' => $telegramUser->telegram_id,
+                    'text' => "Автовоз успешно расформирован!",
+                    'reply_markup' => $this->buildKeyboard([
+                        '📋 Доступные автовозы',
+                        '🗄 Архив расформирований'
+                    ])
+                ]);
+            } else {
+
+                TelegramUserState::updateOrCreate(
+                    ['telegram_user_id' => $telegramUser->id],
+                    ['state' => 'initial']
+                );
+
+                return $event->telegram->sendMessage([
+                    'chat_id' => $telegramUser->telegram_id,
+                    'text' => "Что-то пошло не так! Обратитесь к руководству",
+                    'reply_markup' => $this->buildKeyboard([
+                        '📋 Доступные автовозы',
+                        '🗄 Архив расформирований'
+                    ])
+                ]);
+
+            }
+
 
         }
 
+    }
+
+    private function handleAcceptDisbandCarState(UpdateEvent $event, $telegramUser, $text)
+    {
+
+        if ($text == 'Назад') {
+
+            $telegramUser->state->removeLastState();
+
+            $state = $telegramUser->state->getCurrentState();
+
+            $baseState = explode('-', $state)[1];
+
+            $carrier = Carrier::where('b_id', $baseState)->first();
+
+            $carsData = DB::connection('mysql_dbmihold')
+                ->table('b_uts_crm_deal')
+                ->select('UF_CRM_1663349303')
+                ->where('VALUE_ID', $baseState)
+                ->first();
+
+            $idsCars = unserialize($carsData->UF_CRM_1663349303);
+
+            $cars = [];
+
+            foreach ($idsCars as $idcar) {
+
+                $car = DB::connection('mysql_dbmihold')
+                    ->table('b_crm_deal')
+                    ->select('TITLE')
+                    ->where('ID', $idcar)
+                    ->first();
+
+                $cars[] = $car->TITLE;
+
+            }
+
+            $cars[] = 'Расформировать всё';
+            $cars[] = 'Назад';
+
+            return $event->telegram->sendMessage([
+                'chat_id' => $telegramUser->telegram_id,
+                'text' => "Выбран $carrier->b_title\nАвтомобили на данном автовозе:",
+                'reply_markup' => $this->buildKeyboard($cars)
+            ]);
+
+        } else if ($text == 'Подтвердить') {
+
+//            $telegramUser->state->addState("confirm");
+
+            $fullState = $telegramUser->state->state;
+
+            preg_match('/initial:available_carriers:selected_carriers-(\d+):selected_car-(\d+):accept_disband_car/', $fullState, $matches);
+
+            if ($matches) {
+                $selectedCarriers = $matches[1];
+                $selectedCar = $matches[2];
+            }
+
+            $carOper = DB::connection('mysql_dbmihold')
+                ->table('b_uts_crm_deal')
+                ->where('VALUE_ID', $selectedCar)
+                ->value('UF_CRM_1695214894');
+
+            $user = $this->getBitrixUserId($telegramUser);
+
+            if ($user) {
+                Log::info('start webhook');
+                $this->StartBP($carOper, $user, false, true);
+                Log::info('end webhook');
+
+//                Carrier::updateOrCreate(['b_id' => $selectedCarriers],['is_disabled' => true]);
+
+                TelegramUserState::updateOrCreate(
+                    ['telegram_user_id' => $telegramUser->id],
+                    ['state' => 'initial']
+                );
+
+                return $event->telegram->sendMessage([
+                    'chat_id' => $telegramUser->telegram_id,
+                    'text' => "Автомобиль успешно расформирован на ЧЛС!",
+                    'reply_markup' => $this->buildKeyboard([
+                        '📋 Доступные автовозы',
+                        '🗄 Архив расформирований'
+                    ])
+                ]);
+            } else {
+
+                TelegramUserState::updateOrCreate(
+                    ['telegram_user_id' => $telegramUser->id],
+                    ['state' => 'initial']
+                );
+
+                return $event->telegram->sendMessage([
+                    'chat_id' => $telegramUser->telegram_id,
+                    'text' => "Что-то пошло не так! Обратитесь к руководству",
+                    'reply_markup' => $this->buildKeyboard([
+                        '📋 Доступные автовозы',
+                        '🗄 Архив расформирований'
+                    ])
+                ]);
+
+            }
+
+
+        }
+
+    }
+
+    function getBitrixUserId($telegramUser)
+    {
+        $BitrixUserId = DB::connection('mysql_dbmihold')
+            ->table('b_user')
+            ->where('WORK_PHONE', $telegramUser->phone_number)
+            ->where('LAST_LOGIN', '>=', now()->subDays(30))
+            ->orderBy('LAST_LOGIN', 'desc')
+            ->value('ID');
+
+        return $BitrixUserId;
+    }
+
+    function StartBP($deal, $user, $date, $chls)
+    {
+        $baseURL = 'https://mihold.online/rest/188354/xnzkyyhsxccqi142/bizproc.workflow.start/?';
+        $params = array(
+            'TEMPLATE_ID' => 4451,
+            'DOCUMENT_ID[0]' => 'crm',
+            'DOCUMENT_ID[1]' => 'CCrmDocumentDeal',
+            'DOCUMENT_ID[2]' => "D_" . $deal,
+            'PARAMETERS' => array('deal' => $deal, 'user' => $user, 'date' => $date, 'chls' => $chls),
+        );
+
+        $finalURL = $baseURL . http_build_query($params);
+
+        $ch = curl_init();
+
+        curl_setopt($ch, CURLOPT_URL, $baseURL);
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/x-www-form-urlencoded'));
+
+        Log::info('Starting cURL request to URL: ' . $baseURL);
+        Log::info('Final URL: ' . $finalURL);
+        Log::info('Parameters: ' . print_r($params, true));
+
+        $response = curl_exec($ch);
+
+        Log::info('cURL response: ' . $response);
+
+        if ($response === false) {
+            Log::info('Error: ' . curl_error($ch));
+        } else {
+            $result = json_decode($response, true);
+            if (isset($result['error'])) {
+                Log::info('Error: ' . $result['error']);
+            }
+        }
+
+        curl_close($ch);
     }
 
     /**
